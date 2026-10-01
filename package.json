@@ -1,7 +1,12 @@
 {
-  "name":"ash-whatsapp-ai-engine",
-  "version":"1.0.0",
-  "private":true,
-  "type":"module",
-  "scripts":{"start":"node src/server.js"}
+  "name": "ash-whatsapp-ai-engine",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "6.7.24"
+  }
 }
