@@ -243,5 +243,22 @@ const server=http.createServer((req,res)=>route(req,res).catch(error=>{
 
 server.listen(PORT,"0.0.0.0",()=>console.log(`${ENGINE_NAME} listening on ${PORT}`));
 
-process.on("SIGTERM",()=>Promise.all([...sessions.keys()].map(closeSession)).finally(()=>server.close()));
-process.on("SIGINT",()=>Promise.all([...sessions.keys()].map(closeSession)).finally(()=>server.close()));
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Received ${signal}; shutting down gracefully`);
+  try {
+    await Promise.all([...sessions.keys()].map(closeSession));
+  } catch (error) {
+    console.error("Session shutdown error:", error?.message || error);
+  }
+  await new Promise((resolve) => {
+    server.close(() => resolve());
+  }).catch(() => {});
+  console.log("HTTP server closed");
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => { void gracefulShutdown("SIGTERM"); });
+process.on("SIGINT", () => { void gracefulShutdown("SIGINT"); });
