@@ -43,7 +43,9 @@ function normalizePhone(phone) {
 }
 
 function jidFor(phone) {
-  const n = normalizePhone(phone);
+  const value = String(phone || "").trim();
+  if (/^[0-9]+@(s\\.whatsapp\\.net|g\\.us)$/.test(value)) return value;
+  const n = normalizePhone(value);
   return n ? `${n}@s.whatsapp.net` : null;
 }
 
