@@ -56,7 +56,7 @@ async function notifyWebhook(event) {
       method:"POST",
       headers:{
         "content-type":"application/json",
-        ...(WEBHOOK_SECRET ? {"x-engine-secret":WEBHOOK_SECRET} : {})
+        ...(ENGINE_SECRET ? {"x-engine-secret":ENGINE_SECRET} : {})
       },
       body:JSON.stringify(event)
     });
