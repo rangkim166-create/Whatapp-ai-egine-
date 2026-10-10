@@ -173,24 +173,25 @@ async function closeSession(sessionId) {
 }
 
 async function route(req, res) {
-  if (req.method === "GET" && req.url === "/health") {
+  const pathname = new URL(req.url || "/", "http://localhost").pathname.replace(/\/+$/, "") || "/";
+  if (req.method === "GET" && pathname === "/health") {
     return json(res,200,{ok:true,engine:ENGINE_NAME,status:"online",sessions:sessions.size,timestamp:new Date().toISOString()});
   }
 
   if (!authorized(req)) return json(res,401,{ok:false,error:"Unauthorized"});
 
-  if (req.method === "GET" && req.url === "/") {
+  if (req.method === "GET" && pathname === "/") {
     return json(res,200,{ok:true,engine:ENGINE_NAME,version:"2.0.0",whatsapp:"baileys"});
   }
 
-  if (req.method === "GET" && req.url === "/sessions") {
+  if (req.method === "GET" && pathname === "/sessions") {
     return json(res,200,{ok:true,sessions:[...sessions.values()].map(s=>({
       sessionId:s.sessionId,phone:s.phone,status:s.status,pairingCode:s.pairingCode,
       connectedAt:s.connectedAt,lastError:s.lastError
     }))});
   }
 
-  if (req.method === "POST" && req.url === "/connect") {
+  if (req.method === "POST" && pathname === "/connect") {
     let payload={};
     try { payload=JSON.parse(await readBody(req)||"{}"); } catch { return json(res,400,{ok:false,error:"Invalid JSON"}); }
     const sessionId=String(payload.sessionId||"").trim();
@@ -204,14 +205,14 @@ async function route(req, res) {
     }
   }
 
-  if (req.method === "GET" && req.url.startsWith("/status/")) {
-    const sessionId=decodeURIComponent(req.url.slice("/status/".length));
+  if (req.method === "GET" && pathname.startsWith("/status/")) {
+    const sessionId=decodeURIComponent(pathname.slice("/status/".length));
     const s=sessions.get(sessionId);
     if (!s) return json(res,404,{ok:false,error:"Session not found"});
     return json(res,200,{ok:true,sessionId:s.sessionId,phone:s.phone,status:s.status,pairingCode:s.pairingCode,connectedAt:s.connectedAt,lastError:s.lastError});
   }
 
-  if (req.method === "POST" && req.url === "/send") {
+  if (req.method === "POST" && pathname === "/send") {
     let payload={};
     try { payload=JSON.parse(await readBody(req)||"{}"); } catch { return json(res,400,{ok:false,error:"Invalid JSON"}); }
     const s=sessions.get(String(payload.sessionId||""));
@@ -227,7 +228,7 @@ async function route(req, res) {
     }
   }
 
-  if (req.method === "POST" && req.url === "/disconnect") {
+  if (req.method === "POST" && pathname === "/disconnect") {
     let payload={};
     try { payload=JSON.parse(await readBody(req)||"{}"); } catch { return json(res,400,{ok:false,error:"Invalid JSON"}); }
     return json(res,200,{ok:await closeSession(String(payload.sessionId||""))});
