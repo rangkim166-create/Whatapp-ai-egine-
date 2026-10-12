@@ -71,7 +71,15 @@ async function startSession(sessionId, phone) {
 
   const sessionDir = path.join(AUTH_ROOT, sessionId);
   await fs.mkdir(sessionDir, {recursive:true});
-  const {state, saveCreds} = await useMultiFileAuthState(sessionDir);
+  let auth = await useMultiFileAuthState(sessionDir);
+  // Incomplete, unregistered auth folders can leave Baileys stuck in a broken
+  // handshake on a retry. Keep credentials only after WhatsApp has registered.
+  if (!auth.state.creds.registered) {
+    await fs.rm(sessionDir, {recursive:true, force:true});
+    await fs.mkdir(sessionDir, {recursive:true});
+    auth = await useMultiFileAuthState(sessionDir);
+  }
+  const {state, saveCreds} = auth;
 
   let version;
   try {
@@ -150,10 +158,18 @@ async function startSession(sessionId, phone) {
     } else if (connection === "close") {
       const code = lastDisconnect?.error?.output?.statusCode;
       session.lastError = String(code || "connection_closed");
-      session.status = code === DisconnectReason.loggedOut ? "logged_out" : "reconnecting";
       session.sock = null;
       await notifyWebhook({type:"connection.close",sessionId,phone:session.phone,code});
-      if (code !== DisconnectReason.loggedOut) {
+      if (code === DisconnectReason.loggedOut) {
+        session.status = "logged_out";
+      } else if (!state.creds.registered) {
+        // Don't silently spin up endless fresh sockets when the phone has not
+        // completed linking. Report the failure and let the user retry cleanly.
+        session.status = "error";
+        session.lastError = `WhatsApp closed the connection before linking completed (code: ${code || "unknown"}). Retry to request a fresh pairing code.`;
+        console.error(session.lastError);
+      } else {
+        session.status = "reconnecting";
         setTimeout(() => startSession(sessionId, session.phone).catch(err => {
           session.status = "error";
           session.lastError = err?.message || String(err);
