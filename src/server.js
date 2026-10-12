@@ -239,7 +239,7 @@ async function closeSession(sessionId) {
 async function route(req, res) {
   const pathname = new URL(req.url || "/", "http://localhost").pathname.replace(/\/+$/, "") || "/";
   if (req.method === "GET" && pathname === "/health") {
-    return json(res,200,{ok:true,engine:ENGINE_NAME,status:"online",sessions:sessions.size,timestamp:new Date().toISOString()});
+    return json(res,200,{ok:true,status:"online",timestamp:new Date().toISOString()});
   }
 
   if (!authorized(req)) return json(res,401,{ok:false,error:"Unauthorized"});
