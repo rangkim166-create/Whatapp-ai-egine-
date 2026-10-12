@@ -2,8 +2,8 @@ name: Keep WhatsApp Engine Awake
 
 on:
   schedule:
-    # Ping every 10 minutes; GitHub may delay scheduled runs during busy periods.
-    - cron: "*/10 * * * *"
+    # Ping every 5 minutes; GitHub may delay scheduled runs during busy periods.
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
