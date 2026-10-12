@@ -82,7 +82,7 @@ async function startSession(sessionId, phone) {
   const sock = makeWASocket({
     auth: state,
     version,
-    browser: Browsers.ubuntu(ENGINE_NAME),
+    browser: Browsers.macOS("Chrome"),
     printQRInTerminal: false,
     markOnlineOnConnect: false,
     syncFullHistory: false
@@ -94,6 +94,7 @@ async function startSession(sessionId, phone) {
     sock,
     status: state.creds.registered ? "connecting" : "pairing",
     pairingCode: null,
+    pairingRequested: false,
     connectedAt: null,
     lastError: null
   };
@@ -101,7 +102,23 @@ async function startSession(sessionId, phone) {
 
   sock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("connection.update", async ({connection, lastDisconnect}) => {
+  sock.ev.on("connection.update", async ({connection, lastDisconnect, qr}) => {
+    // Wait for Baileys' QR event: a fixed timer can race the WhatsApp handshake.
+    if (qr && !state.creds.registered && !session.pairingRequested) {
+      session.pairingRequested = true;
+      try {
+        session.pairingCode = await sock.requestPairingCode(session.phone);
+        session.status = "pairing";
+        session.lastError = null;
+        console.log(`Pairing code generated for session ${sessionId}`);
+      } catch (error) {
+        session.pairingRequested = false;
+        session.status = "error";
+        session.lastError = error?.message || String(error);
+        console.error("Pairing code request failed:", session.lastError);
+      }
+    }
+
     if (connection === "open") {
       session.status = "connected";
       session.pairingCode = null;
@@ -150,19 +167,6 @@ async function startSession(sessionId, phone) {
     }
   });
 
-  if (!state.creds.registered) {
-    setTimeout(async () => {
-      try {
-        session.pairingCode = await sock.requestPairingCode(session.phone);
-        session.status = "pairing";
-        console.log(`Pairing code for ${sessionId}: ${session.pairingCode}`);
-      } catch (error) {
-        session.lastError = error?.message || String(error);
-        console.error("Pairing code failed:", session.lastError);
-      }
-    }, 2500);
-  }
-
   return session;
 }
 
@@ -198,7 +202,7 @@ async function route(req, res) {
     try { payload=JSON.parse(await readBody(req)||"{}"); } catch { return json(res,400,{ok:false,error:"Invalid JSON"}); }
     const sessionId=String(payload.sessionId||"").trim();
     const phone=normalizePhone(payload.phone);
-    if (!sessionId || !/^\d{8,15}$/.test(phone)) return json(res,400,{ok:false,error:"sessionId and international phone number are required"});
+    if (!/^[a-zA-Z0-9_-]{8,80}$/.test(sessionId) || !/^\d{8,15}$/.test(phone)) return json(res,400,{ok:false,error:"A valid session ID and international phone number are required"});
     try {
       const session=await startSession(sessionId,phone);
       return json(res,200,{ok:true,sessionId,phone,status:session.status,pairingCode:session.pairingCode||null});
