@@ -7,6 +7,6 @@
     "start": "node src/server.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "6.7.24"
+    "@whiskeysockets/baileys": "7.0.0-rc14"
   }
 }
