@@ -1,0 +1,25 @@
+name: Keep WhatsApp Engine Awake
+
+on:
+  schedule:
+    # Ping every 10 minutes; GitHub may delay scheduled runs during busy periods.
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping-engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping Render engine health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://whatapp-ai-egine.onrender.com/health"
+          RESPONSE="$(curl --silent --show-error --fail --max-time 25 "$URL")"
+          echo "Engine health response: $RESPONSE"
+          echo "$RESPONSE" | grep -q '"ok":true'
+          echo "$RESPONSE" | grep -q '"status":"online"'
