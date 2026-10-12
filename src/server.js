@@ -130,7 +130,7 @@ async function startSession(sessionId, phone) {
   };
 
   if (!state.creds.registered) {
-    pairingTimer = setTimeout(() => { void requestPairingCodeOnce(); }, 2500);
+    pairingTimer = setTimeout(() => { void requestPairingCodeOnce(); }, 6500);
   }
 
   sock.ev.on("connection.update", async ({connection, lastDisconnect, qr}) => {
