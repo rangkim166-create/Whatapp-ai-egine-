@@ -280,11 +280,11 @@ async function route(req, res) {
   }
 
   if (req.method === "POST" && pathname === "/send") {
-    const sidForLimit = String(req.headers["x-session-id"] || "unknown");
-    if (isRateLimited("send:" + sidForLimit, 60, 60 * 1000)) return json(res,429,{ok:false,error:"Message send rate limit reached. Try again shortly."});
     let payload={};
     try { payload=JSON.parse(await readBody(req)||"{}"); } catch { return json(res,400,{ok:false,error:"Invalid JSON"}); }
-    const s=sessions.get(String(payload.sessionId||""));
+    const sendSessionId=String(payload.sessionId||"");
+    if (isRateLimited("send:" + sendSessionId, 60, 60 * 1000)) return json(res,429,{ok:false,error:"Message send rate limit reached. Try again shortly."});
+    const s=sessions.get(sendSessionId);
     const to=jidFor(payload.to);
     const text=String(payload.text||"").trim();
     if (!s?.sock || s.status !== "connected") return json(res,409,{ok:false,error:"Session is not connected"});
