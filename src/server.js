@@ -17,9 +17,26 @@ const AUTH_ROOT = process.env.AUTH_ROOT || "/app/auth";
 const ENGINE_NAME = "Ash WhatsApp AI Engine";
 
 const sessions = new Map();
+const rateBuckets = new Map();
+const MAX_SESSIONS = Math.max(1, Math.min(25, Number(process.env.MAX_SESSIONS || 10)));
+function isRateLimited(key, max, windowMs) {
+  const now = Date.now();
+  let bucket = rateBuckets.get(key);
+  if (!bucket || bucket.resetAt <= now) { bucket = { count: 0, resetAt: now + windowMs }; rateBuckets.set(key, bucket); }
+  bucket.count += 1;
+  if (rateBuckets.size > 5000) for (const [k, v] of rateBuckets) if (v.resetAt <= now) rateBuckets.delete(k);
+  return bucket.count > max;
+}
 
 function json(res, status, body) {
-  res.writeHead(status, {"content-type":"application/json; charset=utf-8"});
+  res.writeHead(status, {
+    "content-type":"application/json; charset=utf-8",
+    "cache-control":"no-store, max-age=0",
+    "x-content-type-options":"nosniff",
+    "x-frame-options":"DENY",
+    "referrer-policy":"no-referrer",
+    "permissions-policy":"camera=(), microphone=(), geolocation=()"
+  });
   res.end(JSON.stringify(body));
 }
 
@@ -33,8 +50,12 @@ function authorized(req) {
 }
 
 async function readBody(req) {
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  const chunks = []; let size = 0; const maxBytes = 16 * 1024;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBytes) { const error = new Error("Request body too large"); error.statusCode = 413; throw error; }
+    chunks.push(chunk);
+  }
   return Buffer.concat(chunks).toString("utf8");
 }
 
@@ -235,11 +256,14 @@ async function route(req, res) {
   }
 
   if (req.method === "POST" && pathname === "/connect") {
+    const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown").split(",")[0].trim();
+    if (isRateLimited("connect:" + ip, 5, 10 * 60 * 1000)) return json(res,429,{ok:false,error:"Too many connection attempts. Wait 10 minutes before retrying."});
     let payload={};
     try { payload=JSON.parse(await readBody(req)||"{}"); } catch { return json(res,400,{ok:false,error:"Invalid JSON"}); }
     const sessionId=String(payload.sessionId||"").trim();
     const phone=normalizePhone(payload.phone);
     if (!/^[a-zA-Z0-9_-]{8,80}$/.test(sessionId) || !/^\d{8,15}$/.test(phone)) return json(res,400,{ok:false,error:"A valid session ID and international phone number are required"});
+    if (!sessions.has(sessionId) && sessions.size >= MAX_SESSIONS) return json(res,429,{ok:false,error:"This engine is at its session limit. Try again later."});
     try {
       const session=await startSession(sessionId,phone);
       return json(res,200,{ok:true,sessionId,phone,status:session.status,pairingCode:session.pairingCode||null});
@@ -256,6 +280,8 @@ async function route(req, res) {
   }
 
   if (req.method === "POST" && pathname === "/send") {
+    const sidForLimit = String(req.headers["x-session-id"] || "unknown");
+    if (isRateLimited("send:" + sidForLimit, 60, 60 * 1000)) return json(res,429,{ok:false,error:"Message send rate limit reached. Try again shortly."});
     let payload={};
     try { payload=JSON.parse(await readBody(req)||"{}"); } catch { return json(res,400,{ok:false,error:"Invalid JSON"}); }
     const s=sessions.get(String(payload.sessionId||""));
@@ -281,7 +307,8 @@ async function route(req, res) {
 }
 
 const server=http.createServer((req,res)=>route(req,res).catch(error=>{
-  console.error(error);
+  if (error?.statusCode === 413) return json(res,413,{ok:false,error:"Request body too large"});
+  console.error("Request failed:", error?.message || error);
   json(res,500,{ok:false,error:"Internal server error"});
 }));
 
