@@ -102,24 +102,45 @@ async function startSession(sessionId, phone) {
 
   sock.ev.on("creds.update", saveCreds);
 
+  // Baileys does not reliably emit a QR event for phone-number pairing.
+  // Request the pairing code after the socket has had time to initialize,
+  // and also use a QR event as an early trigger when one is emitted.
+  let pairingTimer;
+  const requestPairingCodeOnce = async () => {
+    if (state.creds.registered || session.pairingCode || session.pairingRequested ||
+        sessions.get(sessionId) !== session || session.sock !== sock) return;
+    session.pairingRequested = true;
+    session.status = "requesting_code";
+    try {
+      const code = await Promise.race([
+        sock.requestPairingCode(session.phone),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("WhatsApp pairing request timed out. Please try again.")), 15000))
+      ]);
+      if (sessions.get(sessionId) !== session || session.sock !== sock) return;
+      session.pairingCode = code;
+      session.status = "pairing";
+      session.lastError = null;
+      console.log(`Pairing code generated for session ${sessionId}`);
+    } catch (error) {
+      session.pairingRequested = false;
+      session.status = "error";
+      session.lastError = error?.message || String(error);
+      console.error("Pairing code request failed:", session.lastError);
+    }
+  };
+
+  if (!state.creds.registered) {
+    pairingTimer = setTimeout(() => { void requestPairingCodeOnce(); }, 2500);
+  }
+
   sock.ev.on("connection.update", async ({connection, lastDisconnect, qr}) => {
-    // Wait for Baileys' QR event: a fixed timer can race the WhatsApp handshake.
-    if (qr && !state.creds.registered && !session.pairingRequested) {
-      session.pairingRequested = true;
-      try {
-        session.pairingCode = await sock.requestPairingCode(session.phone);
-        session.status = "pairing";
-        session.lastError = null;
-        console.log(`Pairing code generated for session ${sessionId}`);
-      } catch (error) {
-        session.pairingRequested = false;
-        session.status = "error";
-        session.lastError = error?.message || String(error);
-        console.error("Pairing code request failed:", session.lastError);
-      }
+    if (qr && !state.creds.registered) {
+      clearTimeout(pairingTimer);
+      void requestPairingCodeOnce();
     }
 
     if (connection === "open") {
+      clearTimeout(pairingTimer);
       session.status = "connected";
       session.pairingCode = null;
       session.connectedAt = new Date().toISOString();
