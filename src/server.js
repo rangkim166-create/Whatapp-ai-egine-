@@ -65,7 +65,7 @@ function normalizePhone(phone) {
 
 function jidFor(phone) {
   const value = String(phone || "").trim();
-  if (/^[0-9]+@(s\.whatsapp\.net|g\.us)$/.test(value)) return value;
+  if (/^[0-9]+@(s\.whatsapp\.net|g\.us|lid)$/.test(value)) return value;
   const n = normalizePhone(value);
   return n ? `${n}@s.whatsapp.net` : null;
 }
@@ -216,7 +216,7 @@ async function startSession(sessionId, phone, preserveAuth = false) {
     for (const msg of messages) {
       if (!msg?.message || msg.key?.fromMe) continue;
       const remoteJid = msg.key.remoteJid;
-      if (!remoteJid || remoteJid.endsWith("@status")) continue;
+      if (!remoteJid || remoteJid === "status@broadcast" || remoteJid.endsWith("@status")) continue;
       const body =
         msg.message.conversation ||
         msg.message.extendedTextMessage?.text ||
@@ -302,7 +302,9 @@ async function route(req, res) {
     if (!s?.sock || s.status !== "connected") return json(res,409,{ok:false,error:"Session is not connected"});
     if (!to || !text) return json(res,400,{ok:false,error:"to and text are required"});
     try {
-      const result=await s.sock.sendMessage(to,{text});
+      const sendPromise = s.sock.sendMessage(to,{text});
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("WhatsApp send timed out after 25 seconds")), 25000));
+      const result = await Promise.race([sendPromise, timeoutPromise]);
       return json(res,200,{ok:true,messageId:result?.key?.id||null,to});
     } catch(error) {
       return json(res,500,{ok:false,error:error?.message||String(error)});
