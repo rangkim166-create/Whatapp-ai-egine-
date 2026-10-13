@@ -86,16 +86,17 @@ async function notifyWebhook(event) {
   }
 }
 
-async function startSession(sessionId, phone) {
+async function startSession(sessionId, phone, preserveAuth = false) {
   const existing = sessions.get(sessionId);
   if (existing?.sock) return existing;
 
   const sessionDir = path.join(AUTH_ROOT, sessionId);
   await fs.mkdir(sessionDir, {recursive:true});
   let auth = await useMultiFileAuthState(sessionDir);
-  // Incomplete, unregistered auth folders can leave Baileys stuck in a broken
-  // handshake on a retry. Keep credentials only after WhatsApp has registered.
-  if (!auth.state.creds.registered) {
+  // A brand-new pairing attempt should start clean when there are no registered
+  // credentials. During Baileys' restart-required (515) handshake, preserve the
+  // updated keys: deleting them here makes phone linking fail in a loop.
+  if (!auth.state.creds.registered && !preserveAuth) {
     await fs.rm(sessionDir, {recursive:true, force:true});
     await fs.mkdir(sessionDir, {recursive:true});
     auth = await useMultiFileAuthState(sessionDir);
@@ -177,12 +178,22 @@ async function startSession(sessionId, phone) {
       console.log(`WhatsApp connected: ${sessionId}`);
       await notifyWebhook({type:"connection.open",sessionId,phone:session.phone});
     } else if (connection === "close") {
+      clearTimeout(pairingTimer);
       const code = lastDisconnect?.error?.output?.statusCode;
       session.lastError = String(code || "connection_closed");
       session.sock = null;
       await notifyWebhook({type:"connection.close",sessionId,phone:session.phone,code});
       if (code === DisconnectReason.loggedOut) {
         session.status = "logged_out";
+      } else if (code === DisconnectReason.restartRequired || code === 515) {
+        // WhatsApp commonly closes with 515 after a successful pairing handshake.
+        // This is a required socket restart, not a terminal pairing failure.
+        session.status = "reconnecting";
+        setTimeout(() => startSession(sessionId, session.phone, true).catch(err => {
+          session.status = "error";
+          session.lastError = err?.message || String(err);
+          console.error("WhatsApp restart-required recovery failed:", session.lastError);
+        }), 500);
       } else if (!state.creds.registered) {
         // Don't silently spin up endless fresh sockets when the phone has not
         // completed linking. Report the failure and let the user retry cleanly.
@@ -191,9 +202,10 @@ async function startSession(sessionId, phone) {
         console.error(session.lastError);
       } else {
         session.status = "reconnecting";
-        setTimeout(() => startSession(sessionId, session.phone).catch(err => {
+        setTimeout(() => startSession(sessionId, session.phone, true).catch(err => {
           session.status = "error";
           session.lastError = err?.message || String(err);
+          console.error("WhatsApp reconnect failed:", session.lastError);
         }), 2000);
       }
     }
