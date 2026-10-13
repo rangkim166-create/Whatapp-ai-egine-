@@ -248,6 +248,41 @@ async function closeSession(sessionId) {
   return true;
 }
 
+async function restoreSavedSession(sessionId) {
+  if (!/^[a-zA-Z0-9_-]{8,80}$/.test(sessionId)) return null;
+  if (sessions.has(sessionId)) return sessions.get(sessionId);
+  const sessionDir = path.join(AUTH_ROOT, sessionId);
+  try {
+    const auth = await useMultiFileAuthState(sessionDir);
+    if (!auth.state.creds.registered) return null;
+    const meId = String(auth.state.creds.me?.id || "");
+    const phone = meId.split("@")[0].split(":")[0].replace(/[^0-9]/g, "");
+    if (!phone) {
+      console.warn(`Saved WhatsApp session ${sessionId} has credentials but no recoverable phone ID`);
+      return null;
+    }
+    console.log(`Restoring saved WhatsApp session: ${sessionId}`);
+    return await startSession(sessionId, phone, true);
+  } catch (error) {
+    if (error?.code !== "ENOENT") console.warn(`Could not restore session ${sessionId}:`, error?.message || error);
+    return null;
+  }
+}
+
+async function restoreSavedSessionsAtBoot() {
+  try {
+    await fs.mkdir(AUTH_ROOT, {recursive:true});
+    const entries = await fs.readdir(AUTH_ROOT, {withFileTypes:true});
+    for (const entry of entries) {
+      if (!entry.isDirectory() || sessions.size >= MAX_SESSIONS) continue;
+      await restoreSavedSession(entry.name);
+    }
+    console.log(`Saved WhatsApp session restore scan finished; restored ${sessions.size} session(s)`);
+  } catch (error) {
+    console.error("Saved WhatsApp session scan failed:", error?.message || error);
+  }
+}
+
 async function route(req, res) {
   const pathname = new URL(req.url || "/", "http://localhost").pathname.replace(/\/+$/, "") || "/";
   if (req.method === "GET" && pathname === "/health") {
@@ -286,8 +321,9 @@ async function route(req, res) {
 
   if (req.method === "GET" && pathname.startsWith("/status/")) {
     const sessionId=decodeURIComponent(pathname.slice("/status/".length));
-    const s=sessions.get(sessionId);
-    if (!s) return json(res,404,{ok:false,error:"Session not found"});
+    let s=sessions.get(sessionId);
+    if (!s) s = await restoreSavedSession(sessionId);
+    if (!s) return json(res,404,{ok:false,error:"Session not found and no saved linked credentials were available to restore it. The hosting filesystem may have been reset."});
     return json(res,200,{ok:true,sessionId:s.sessionId,phone:s.phone,status:s.status,pairingCode:s.pairingCode,connectedAt:s.connectedAt,lastError:s.lastError});
   }
 
@@ -326,7 +362,7 @@ const server=http.createServer((req,res)=>route(req,res).catch(error=>{
   json(res,500,{ok:false,error:"Internal server error"});
 }));
 
-server.listen(PORT,"0.0.0.0",()=>console.log(`${ENGINE_NAME} listening on ${PORT}`));
+server.listen(PORT,"0.0.0.0",()=>{console.log(`${ENGINE_NAME} listening on ${PORT}`);void restoreSavedSessionsAtBoot();});
 
 let shuttingDown = false;
 async function gracefulShutdown(signal) {
