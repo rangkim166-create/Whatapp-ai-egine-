@@ -63,7 +63,7 @@ function normalizePhone(phone) {
   return String(phone || "").replace(/[^0-9]/g, "");
 }
 
-const AUTH_VAULT_BASE = (process.env.AUTH_VAULT_URL || ((process.env.SUPABASE_URL || "") + "/functions/v1/whatsapp-auth-vault")).replace(/\\/+$/, "");
+const AUTH_VAULT_BASE = (process.env.AUTH_VAULT_URL || ((process.env.SUPABASE_URL || "") + "/functions/v1/whatsapp-auth-vault")).replace(/\/+$/, "");
 const snapshotJobs = new Map();
 
 function authVaultEnabled() {
@@ -123,7 +123,7 @@ async function persistAuthSnapshot(sessionId) {
     const entries = await fs.readdir(sessionDir, { withFileTypes: true }).catch(() => []);
     const files = {};
     for (const entry of entries) {
-      if (!entry.isFile() || !/^[A-Za-z0-9._-]+\\.json$/.test(entry.name)) continue;
+      if (!entry.isFile() || !/^[A-Za-z0-9._-]+\.json$/.test(entry.name)) continue;
       files[entry.name] = await fs.readFile(path.join(sessionDir, entry.name), "utf8");
     }
     if (!Object.keys(files).length) return false;
@@ -147,7 +147,7 @@ async function restoreAuthSnapshot(sessionId, sessionDir) {
   const names = Object.keys(snapshot.files);
   if (!names.length || names.length > 2000) return false;
   for (const name of names) {
-    if (!/^[A-Za-z0-9._-]+\\.json$/.test(name) || typeof snapshot.files[name] !== "string") throw new Error("Invalid auth snapshot file");
+    if (!/^[A-Za-z0-9._-]+\.json$/.test(name) || typeof snapshot.files[name] !== "string") throw new Error("Invalid auth snapshot file");
     const target = path.join(sessionDir, name);
     const temp = target + ".restore-tmp";
     await fs.writeFile(temp, snapshot.files[name], { mode: 0o600 });
