@@ -409,6 +409,9 @@ async function restoreSavedSessionsAtBoot() {
       await restoreSavedSession(entry.name);
     }
     console.log("Saved WhatsApp session restore scan finished; restored " + sessions.size + " session(s)");
+    // Tell Supabase which sessions this process actually restored. The database can
+    // otherwise keep showing a stale "connected" state after a Render restart.
+    await notifyWebhook({type:"engine.ready",restoredSessionIds:[...sessions.keys()]});
   } catch (error) {
     console.error("Saved WhatsApp session scan failed:", error?.message || error);
   }
