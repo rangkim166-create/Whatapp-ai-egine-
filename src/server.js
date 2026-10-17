@@ -409,6 +409,8 @@ async function restoreSavedSessionsAtBoot() {
       await restoreSavedSession(entry.name);
     }
     console.log("Saved WhatsApp session restore scan finished; restored " + sessions.size + " session(s)");
+    // Report restored sessions so Supabase can clear stale connection state after restarts.
+    await notifyWebhook({type:"engine.ready",restoredSessionIds:[...sessions.keys()]});
   } catch (error) {
     console.error("Saved WhatsApp session scan failed:", error?.message || error);
   }
